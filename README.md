@@ -92,8 +92,8 @@ for i := 0; i < 3; i++ {
 Возвращает текущее состояние rate limiter'а.
 
 **Возвращает:**
-- `int` - количество уже использованных запросов в текущем интервале
-- `time.Duration` - время до сброса счетчика
+- `int` - количество токенов, доступных прямо сейчас
+- `time.Duration` - время до появления следующего токена (0, если токен уже доступен)
 
 **Пример:**
 ```go
@@ -104,8 +104,8 @@ rl.AllowRequest()
 rl.AllowRequest()
 
 // Проверяем состояние
-requests, timeUntilReset := rl.CurrentState()
-fmt.Printf("Использовано запросов: %d, до сброса: %v\n", requests, timeUntilReset)
+available, timeUntilNextToken := rl.CurrentState()
+fmt.Printf("Доступно токенов: %d, до следующего: %v\n", available, timeUntilNextToken)
 ```
 
 ## Примеры использования
@@ -188,9 +188,9 @@ func main() {
         defer ticker.Stop()
         
         for range ticker.C {
-            requests, timeLeft := rl.CurrentState()
-            fmt.Printf("Состояние: %d/%d запросов, до сброса: %v\n", 
-                requests, 3, timeLeft.Round(time.Millisecond))
+            available, timeLeft := rl.CurrentState()
+            fmt.Printf("Состояние: %d/%d токенов доступно, до следующего: %v\n",
+                available, 3, timeLeft.Round(time.Millisecond))
         }
     }()
     
@@ -215,9 +215,9 @@ Rate limiter оптимизирован для высокой производи
 ### Бенчмарки
 
 ```
-BenchmarkAllowRequest-22              26956904    43.04 ns/op
-BenchmarkConcurrentAllowRequest-22     9799383   111.5 ns/op
-BenchmarkCurrentState-22              44034135    27.94 ns/op
+BenchmarkAllowRequest-22              29049027    38.81 ns/op
+BenchmarkConcurrentAllowRequest-22     9769224   121.4 ns/op
+BenchmarkCurrentState-22              27427677    40.28 ns/op
 ```
 
 ## Тестирование

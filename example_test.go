@@ -36,18 +36,18 @@ func ExampleRateLimiter_AllowRequest() {
 		fmt.Println("Request 3: denied (rate limit exceeded)")
 	}
 
-	// Ждем сброса лимита
+	// Ждем, пока накопится токен
 	time.Sleep(110 * time.Millisecond)
 
-	// После сброса запрос снова разрешен
+	// После пополнения запрос снова разрешен
 	if rl.AllowRequest() {
-		fmt.Println("Request after reset: allowed")
+		fmt.Println("Request after refill: allowed")
 	}
 	// Output:
 	// Request 1: allowed
 	// Request 2: allowed
 	// Request 3: denied (rate limit exceeded)
-	// Request after reset: allowed
+	// Request after refill: allowed
 }
 
 func ExampleRateLimiter_CurrentState() {
@@ -58,12 +58,12 @@ func ExampleRateLimiter_CurrentState() {
 	rl.AllowRequest()
 
 	// Проверяем текущее состояние
-	requests, timeUntilReset := rl.CurrentState()
-	fmt.Printf("Current requests: %d\n", requests)
-	if timeUntilReset > 0 {
-		fmt.Println("Rate limiter is active")
+	available, wait := rl.CurrentState()
+	fmt.Printf("Available tokens: %d\n", available)
+	if wait == 0 {
+		fmt.Println("Rate limiter is not blocking")
 	}
 	// Output:
-	// Current requests: 2
-	// Rate limiter is active
+	// Available tokens: 3
+	// Rate limiter is not blocking
 }

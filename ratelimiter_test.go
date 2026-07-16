@@ -47,14 +47,14 @@ func TestNewRateLimiter(t *testing.T) {
 				t.Errorf("Expected interval %v, got %v", tt.interval, rl.GetInterval())
 			}
 
-			requests, _ := rl.CurrentState()
-			if requests != 0 {
-				t.Errorf("Expected initial requests 0, got %d", requests)
+			available, _ := rl.CurrentState()
+			if available != tt.rps {
+				t.Errorf("Expected initial available tokens %d, got %d", tt.rps, available)
 			}
 
-			// Проверяем, что retryAfter установлен в будущем
-			if rl.GetRetryAfter().Before(time.Now()) {
-				t.Error("retryAfter should be in the future")
+			// Изначально бакет полон, поэтому токен уже доступен сейчас.
+			if rl.GetRetryAfter().After(time.Now()) {
+				t.Error("retryAfter should not be in the future when the bucket is full")
 			}
 		})
 	}
@@ -76,7 +76,7 @@ func TestAllowRequest_Basic(t *testing.T) {
 	}
 }
 
-func TestAllowRequest_ResetAfterInterval(t *testing.T) {
+func TestAllowRequest_RefillAfterInterval(t *testing.T) {
 	rl := ratelimiter.NewRateLimiter(2, 50*time.Millisecond)
 
 	// Исчерпываем лимит
@@ -90,12 +90,12 @@ func TestAllowRequest_ResetAfterInterval(t *testing.T) {
 		t.Error("Third request should be denied")
 	}
 
-	// Ждем сброса интервала
+	// Ждем, пока накопится хотя бы один токен
 	time.Sleep(60 * time.Millisecond)
 
-	// После сброса должны снова разрешить запросы
+	// После пополнения должны снова разрешить запросы
 	if !rl.AllowRequest() {
-		t.Error("Request after reset should be allowed")
+		t.Error("Request after refill should be allowed")
 	}
 }
 
@@ -111,25 +111,28 @@ func TestAllowRequest_ZeroRPS(t *testing.T) {
 func TestCurrentState(t *testing.T) {
 	rl := ratelimiter.NewRateLimiter(5, time.Second)
 
-	// Начальное состояние
-	requests, timeUntilReset := rl.CurrentState()
-	if requests != 0 {
-		t.Errorf("Expected initial requests 0, got %d", requests)
+	// Начальное состояние: бакет полон.
+	available, wait := rl.CurrentState()
+	if available != 5 {
+		t.Errorf("Expected initial available tokens 5, got %d", available)
 	}
-	if timeUntilReset <= 0 {
-		t.Error("timeUntilReset should be positive")
+	if wait != 0 {
+		t.Errorf("Expected wait 0 when tokens are available, got %v", wait)
 	}
 
-	// Делаем несколько запросов
-	rl.AllowRequest()
-	rl.AllowRequest()
-
-	requests, timeUntilReset = rl.CurrentState()
-	if requests != 2 {
-		t.Errorf("Expected 2 requests, got %d", requests)
+	// Исчерпываем все токены.
+	for i := 0; i < 5; i++ {
+		if !rl.AllowRequest() {
+			t.Errorf("Request %d should be allowed", i+1)
+		}
 	}
-	if timeUntilReset <= 0 {
-		t.Error("timeUntilReset should be positive")
+
+	available, wait = rl.CurrentState()
+	if available != 0 {
+		t.Errorf("Expected 0 available tokens, got %d", available)
+	}
+	if wait <= 0 {
+		t.Error("wait should be positive when no tokens are available")
 	}
 }
 
@@ -183,9 +186,9 @@ func TestConcurrentStateAccess(t *testing.T) {
 	wg.Wait()
 
 	// Проверяем, что состояние корректное
-	requests, _ := rl.CurrentState()
-	if requests > 10 {
-		t.Errorf("Requests should not exceed RPS limit, got %d", requests)
+	available, _ := rl.CurrentState()
+	if available > 10 {
+		t.Errorf("Available tokens should not exceed RPS limit, got %d", available)
 	}
 }
 
@@ -229,7 +232,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 }
 
-func TestRateLimiter_ResetBehavior(t *testing.T) {
+func TestRateLimiter_RefillBehavior(t *testing.T) {
 	rl := ratelimiter.NewRateLimiter(2, 100*time.Millisecond)
 
 	// Исчерпываем лимит
@@ -240,24 +243,24 @@ func TestRateLimiter_ResetBehavior(t *testing.T) {
 		t.Error("Third request should be denied")
 	}
 
-	// Ждем сброса
+	// Ждем, пока бакет полностью пополнится
 	time.Sleep(110 * time.Millisecond)
 
-	// Проверяем, что счетчик сбросился (сброс происходит при следующем AllowRequest)
-	requests, _ := rl.CurrentState()
-	if requests != 2 {
-		t.Errorf("Expected requests to remain 2 until next AllowRequest, got %d", requests)
+	// Токены пополняются непрерывно, поэтому CurrentState сразу видит полный бакет.
+	available, _ := rl.CurrentState()
+	if available != 2 {
+		t.Errorf("Expected 2 available tokens after refill, got %d", available)
 	}
 
 	// Теперь должны снова разрешать запросы
 	if !rl.AllowRequest() {
-		t.Error("Request after reset should be allowed")
+		t.Error("Request after refill should be allowed")
 	}
 
-	// Проверяем, что счетчик сбросился после AllowRequest
-	requests, _ = rl.CurrentState()
-	if requests != 1 {
-		t.Errorf("Expected requests to be 1 after reset and one request, got %d", requests)
+	// Один токен израсходован.
+	available, _ = rl.CurrentState()
+	if available != 1 {
+		t.Errorf("Expected 1 available token after one request, got %d", available)
 	}
 }
 
